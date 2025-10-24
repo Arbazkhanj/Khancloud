@@ -1,3 +1,4 @@
+// routes/auth.js
 import express from "express";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
@@ -5,26 +6,49 @@ import User from "../models/User.js";
 
 const router = express.Router();
 
-// Admin login
-router.post("/login", async (req, res) => {
-  const { email, password } = req.body;
-
+/* --------- REGISTER (Signup) --------- */
+router.post("/register", async (req, res) => {
   try {
-    const user = await User.findOne({ email });
-    if (!user) return res.status(400).json({ message: "User not found" });
+    const { email, password } = req.body;
 
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(400).json({ message: "Invalid credentials" });
+    const existing = await User.findOne({ email });
+    if (existing) return res.status(400).json({ message: "User already exists" });
 
-    const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
-      expiresIn: "8h",
-    });
+    const salt = await bcrypt.genSalt(10);
+    const hashed = await bcrypt.hash(password, salt);
 
-    res.json({ token, user: { email: user.email, role: user.role } });
+    const user = new User({ email, password: hashed, role: "admin" }); // role optional
+    await user.save();
+
+    return res.status(201).json({ message: "User registered successfully" });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error("Signup error:", err);
+    return res.status(500).json({ message: "Server error" });
   }
 });
 
-// ✅ Correct export
+/* --------- LOGIN --------- */
+router.post("/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    const user = await User.findOne({ email });
+    if (!user) return res.status(400).json({ message: "User not found" });
+
+    const ok = await bcrypt.compare(password, user.password);
+    if (!ok) return res.status(400).json({ message: "Invalid credentials" });
+
+    const token = jwt.sign(
+      { id: user._id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: "8h" }
+    );
+
+    return res.json({ token, user: { email: user.email, role: user.role } });
+  } catch (err) {
+    console.error("Login error:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
 export { router };
