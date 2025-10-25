@@ -1,62 +1,96 @@
+// routes/file.js
 import express from "express";
 import multer from "multer";
-import fs from "fs";
 import path from "path";
-import jwt from "jsonwebtoken";
+import fs from "fs";
 import File from "../models/File.js";
-import { fileURLToPath } from "url";
+import User from "../models/User.js";
 
 const router = express.Router();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
+/* -----------------------------
+   FILE UPLOAD CONFIGURATION
+--------------------------------*/
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const uploadPath = path.join(__dirname, "../uploads");
-    if (!fs.existsSync(uploadPath)) fs.mkdirSync(uploadPath);
-    cb(null, uploadPath);
+    const uploadDir = "uploads/";
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir);
+    }
+    cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
-    cb(null, Date.now() + "-" + file.originalname);
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
   },
 });
+
 const upload = multer({ storage });
 
-function auth(req, res, next) {
-  const token = req.headers.authorization?.split(" ")[1];
-  if (!token) return res.status(401).json({ message: "No token provided" });
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
-    next();
-  } catch {
-    res.status(401).json({ message: "Invalid token" });
-  }
-}
-
-router.post("/upload", auth, upload.single("file"), async (req, res) => {
+/* -----------------------------
+   🟢 Upload a New File
+--------------------------------*/
+router.post("/upload", upload.single("file"), async (req, res) => {
   try {
     const file = new File({
-      filename: req.file.filename,
+      name: req.file.filename,
       path: req.file.path,
-      uploadedBy: req.user.id,
+      size: req.file.size,
+      uploadedAt: new Date(),
     });
+
     await file.save();
-    res.json({ message: "File uploaded successfully", file });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(201).json({ message: "File uploaded successfully", file });
+  } catch (error) {
+    console.error("Upload error:", error);
+    res.status(500).json({ message: "Server error" });
   }
 });
 
-router.get("/", auth, async (req, res) => {
+/* -----------------------------
+   🟡 Get All Files
+--------------------------------*/
+router.get("/", async (req, res) => {
   try {
-    const files = await File.find().sort({ createdAt: -1 });
+    const files = await File.find().sort({ uploadedAt: -1 });
     res.json(files);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
+  } catch (error) {
+    res.status(500).json({ message: "Server error" });
   }
 });
 
-// ✅ Correct export
+/* -----------------------------
+   🔴 Delete a File by ID
+--------------------------------*/
+router.delete("/:id", async (req, res) => {
+  try {
+    const file = await File.findById(req.params.id);
+    if (!file) return res.status(404).json({ message: "File not found" });
+
+    fs.unlinkSync(file.path);
+    await file.deleteOne();
+    res.json({ message: "File deleted successfully" });
+  } catch (error) {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+/* -----------------------------
+   📊 Dashboard Stats
+--------------------------------*/
+router.get("/stats", async (req, res) => {
+  try {
+    const totalUsers = await User.countDocuments();
+    const totalFiles = await File.countDocuments();
+
+    res.json({
+      users: totalUsers,
+      files: totalFiles,
+    });
+  } catch (error) {
+    console.error("Stats error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 export { router };
